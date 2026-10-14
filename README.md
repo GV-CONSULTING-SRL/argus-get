@@ -15,10 +15,15 @@ wget -qO- https://get.gvconsulting.eu | sudo sh
    l'ultima release del pannello, ne verifica lo SHA-256, la installa in
    `/opt/argus/bin/argus` (link in `/usr/local/bin/argus`) e avvia `argus install`.
 
-Il token GitHub resta in memoria e non viene salvato sulla macchina.
+Il token GitHub viene salvato in `/etc/argus/credentials.json` (root, permessi 0600):
+rilanciare l'installer o usare `sudo argus update` non richiede un nuovo login.
+Il token legge solo il repository Argus; per revocarlo: GitHub → Settings →
+Applications → Authorized GitHub Apps → *GV Argus Installer* → Revoke.
 Questo repository non contiene segreti né logica del gestionale.
 
-Opzioni: `--dir <cartella>` cartella del `docker-compose.yml` (default `/opt/gv/box`).
+Opzioni: `--dir <cartella>` cartella del `docker-compose.yml` (default `/opt/gv/box`),
+`--login` ignora l'accesso salvato e rifà il login (es. per cambiare account):
+`wget -qO- https://get.gvconsulting.eu | sudo sh -s -- --login`.
 
 Requisiti: Debian/Ubuntu x86_64, root.
 
@@ -26,6 +31,8 @@ Requisiti: Debian/Ubuntu x86_64, root.
 
 - GitHub App *Argus Installer* nell'organizzazione: **Enable Device Flow**, permesso
   repository `Contents: Read-only`, installata **solo** su `Argus`.
+  **Expire user authorization tokens: disattivato**, altrimenti il token salvato
+  scade dopo 8 ore e serve di nuovo il login.
 - Variabile di repository `ARGUS_GH_CLIENT_ID` = Client ID dell'App.
 - `get.gvconsulting.eu` serve `get.sh` (o redirect a
   `https://github.com/GV-CONSULTING-SRL/argus-get/releases/latest/download/get.sh`).

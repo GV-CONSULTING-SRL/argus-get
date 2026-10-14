@@ -4,18 +4,22 @@
 //! su GitHub (device flow di una GitHub App con accesso in sola lettura al
 //! repository privato Argus), scarica l'ultima release del pannello,
 //! ne verifica lo SHA-256 e lo avvia.
+//!
+//! Il token viene salvato in /etc/argus/credentials.json (root, 0600): le
+//! esecuzioni successive e `argus update` lo riusano senza nuovo login.
+//! Vale solo in lettura sul repository Argus e si revoca da GitHub.
 
 use std::fmt::Display;
 use std::fs;
 use std::io::{Read, Write};
-use std::os::unix::fs::{symlink, PermissionsExt};
+use std::os::unix::fs::{symlink, DirBuilderExt, OpenOptionsExt, PermissionsExt};
 use std::os::unix::process::CommandExt;
 use std::path::Path;
 use std::process::{Command, ExitCode};
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 const REPO: &str = "GV-CONSULTING-SRL/Argus";
@@ -30,6 +34,8 @@ const CLIENT_ID: &str = match option_env!("ARGUS_GH_CLIENT_ID") {
 const BIN_DIR: &str = "/opt/argus/bin";
 const LINK: &str = "/usr/local/bin/argus";
 const DEFAULT_DIR: &str = "/opt/gv/box";
+const CRED_DIR: &str = "/etc/argus";
+const CRED_FILE: &str = "/etc/argus/credentials.json";
 const MAX_DOWNLOAD: u64 = 200 * 1024 * 1024;
 
 type Result<T> = std::result::Result<T, String>;
@@ -40,12 +46,14 @@ fn err<E: Display>(contesto: &str) -> impl FnOnce(E) -> String + '_ {
 
 fn main() -> ExitCode {
     let mut dir = DEFAULT_DIR.to_string();
+    let mut nuovo_login = false;
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
         match a.as_str() {
             "--dir" => dir = args.next().unwrap_or(dir),
+            "--login" => nuovo_login = true,
             "-h" | "--help" => {
-                println!("argus-get [--dir CARTELLA]\n\nInstalla Argus e avvia l'installazione nella cartella indicata (default {DEFAULT_DIR}).");
+                println!("argus-get [--dir CARTELLA] [--login]\n\nInstalla Argus e avvia l'installazione nella cartella indicata (default {DEFAULT_DIR}).\n--login  ignora le credenziali salvate e rifa' l'accesso GitHub");
                 return ExitCode::SUCCESS;
             }
             "-V" | "--version" => {
@@ -58,7 +66,7 @@ fn main() -> ExitCode {
             }
         }
     }
-    match run(&dir) {
+    match run(&dir, nuovo_login) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             eprintln!("\n❌ {e}");
@@ -67,7 +75,7 @@ fn main() -> ExitCode {
     }
 }
 
-fn run(dir: &str) -> Result<()> {
+fn run(dir: &str, nuovo_login: bool) -> Result<()> {
     println!("\n  Argus · GV Consulting — installer\n");
     check_system()?;
     if CLIENT_ID.is_empty() {
@@ -82,10 +90,7 @@ fn run(dir: &str) -> Result<()> {
         .redirect_auth_headers(ureq::RedirectAuthHeaders::Never)
         .build();
 
-    let token = device_flow(&agent)?;
-    let gh = GitHub { agent, token };
-
-    println!("🔎 Verifico l'accesso a {REPO} ...");
+    let gh = login(&agent, nuovo_login)?;
     let release = gh.latest_release()?;
     println!("📦 Ultima release: {}", release.tag_name);
 
@@ -124,6 +129,59 @@ fn check_system() -> Result<()> {
         return Err(format!("sistema non supportato ({}): servono Debian o Ubuntu", campo("PRETTY_NAME")));
     }
     Ok(())
+}
+
+// --- Credenziali ----------------------------------------------------------------
+
+#[derive(Serialize, Deserialize)]
+struct Credentials {
+    github_token: String,
+}
+
+fn load_token() -> Option<String> {
+    let t = fs::read_to_string(CRED_FILE).ok()?;
+    serde_json::from_str::<Credentials>(&t).ok().map(|c| c.github_token)
+}
+
+fn save_token(token: &str) -> Result<()> {
+    fs::DirBuilder::new().recursive(true).mode(0o700).create(CRED_DIR).map_err(err(CRED_DIR))?;
+    let json = serde_json::to_string(&Credentials { github_token: token.to_string() }).map_err(err("credenziali"))?;
+    let tmp = format!("{CRED_FILE}.new");
+    let mut f = fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .mode(0o600)
+        .open(&tmp)
+        .map_err(err(CRED_FILE))?;
+    f.write_all(json.as_bytes()).map_err(err(CRED_FILE))?;
+    fs::rename(&tmp, CRED_FILE).map_err(err(CRED_FILE))
+}
+
+/// Usa il token salvato se ancora valido, altrimenti device flow (e lo salva).
+fn login(agent: &ureq::Agent, nuovo_login: bool) -> Result<GitHub> {
+    if !nuovo_login {
+        if let Some(token) = load_token() {
+            let gh = GitHub { agent: agent.clone(), token };
+            println!("🔑 Uso l'accesso GitHub salvato in {CRED_FILE}");
+            if gh.has_access()? {
+                return Ok(gh);
+            }
+            println!("   accesso salvato non piu' valido: serve un nuovo login\n");
+        }
+    }
+    let gh = GitHub { agent: agent.clone(), token: device_flow(agent)? };
+    println!("🔎 Verifico l'accesso a {REPO} ...");
+    if !gh.has_access()? {
+        return Err(format!(
+            "questo account GitHub non ha accesso a {REPO}.\n   Chiedi l'accesso a GV Consulting oppure accedi con un altro account."
+        ));
+    }
+    match save_token(&gh.token) {
+        Ok(()) => println!("🔑 Accesso salvato: i prossimi aggiornamenti non chiederanno il login"),
+        Err(e) => eprintln!("⚠️  accesso non salvato ({e}): al prossimo avvio servira' un nuovo login"),
+    }
+    Ok(gh)
 }
 
 // --- GitHub device flow -------------------------------------------------------
@@ -244,16 +302,16 @@ impl GitHub {
             .call()
     }
 
-    fn latest_release(&self) -> Result<Release> {
+    /// Il token puo' leggere il repository? (false = negato, scaduto o revocato)
+    fn has_access(&self) -> Result<bool> {
         match self.get(&format!("https://api.github.com/repos/{REPO}"), "application/vnd.github+json") {
-            Ok(_) => {}
-            Err(ureq::Error::Status(401 | 403 | 404, _)) => {
-                return Err(format!(
-                    "questo account GitHub non ha accesso a {REPO}.\n   Chiedi l'accesso a GV Consulting oppure accedi con un altro account."
-                ))
-            }
-            Err(e) => return Err(format!("GitHub: {e}")),
+            Ok(_) => Ok(true),
+            Err(ureq::Error::Status(401 | 403 | 404, _)) => Ok(false),
+            Err(e) => Err(format!("GitHub: {e}")),
         }
+    }
+
+    fn latest_release(&self) -> Result<Release> {
         match self.get(&format!("https://api.github.com/repos/{REPO}/releases/latest"), "application/vnd.github+json") {
             Ok(r) => r.into_json().map_err(err("release non valida")),
             Err(ureq::Error::Status(404, _)) => Err(format!("nessuna release pubblicata su {REPO}")),
