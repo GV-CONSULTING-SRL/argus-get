@@ -1,0 +1,37 @@
+name: update-installer
+
+# Aggiorna solo get.sh (e il suo .sha256) in una release esistente, senza
+# ricompilare argus-get ne' creare un nuovo tag. get.gvconsulting.eu punta a
+# releases/latest/download/get.sh, quindi la modifica e' subito online.
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release da aggiornare (vuoto = ultima release)"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Controllo sintassi
+        run: sh -n get.sh
+      - name: Upload get.sh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          if [ -z "$TAG" ]; then
+            TAG=$(gh release view --json tagName -q .tagName)
+          fi
+          mkdir dist
+          cp get.sh dist/get.sh
+          (cd dist && sha256sum get.sh > get.sh.sha256)
+          gh release upload "$TAG" dist/get.sh dist/get.sh.sha256 --clobber
+          echo "get.sh aggiornato nella release $TAG ($(cut -c1-12 dist/get.sh.sha256))" >> "$GITHUB_STEP_SUMMARY"
