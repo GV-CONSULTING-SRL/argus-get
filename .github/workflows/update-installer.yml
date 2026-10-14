@@ -17,11 +17,13 @@ permissions:
 
 jobs:
   update:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64]
     steps:
       - uses: actions/checkout@v4
       - name: Controllo sintassi
         run: sh -n get.sh
+      - name: Requisiti runner
+        run: command -v gh >/dev/null || { echo "::error::gh (GitHub CLI) non installato sul runner"; exit 1; }
       - name: Upload get.sh
         env:
           GH_TOKEN: ${{ github.token }}
@@ -30,7 +32,7 @@ jobs:
           if [ -z "$TAG" ]; then
             TAG=$(gh release view --json tagName -q .tagName)
           fi
-          mkdir dist
+          rm -rf dist && mkdir dist
           cp get.sh dist/get.sh
           (cd dist && sha256sum get.sh > get.sh.sha256)
           gh release upload "$TAG" dist/get.sh dist/get.sh.sha256 --clobber
