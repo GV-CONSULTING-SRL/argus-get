@@ -107,7 +107,7 @@ fn run(dir: &str) -> Result<()> {
 
 fn check_system() -> Result<()> {
     if unsafe { libc::geteuid() } != 0 {
-        return Err("serve root: curl -fsSL https://get.gvconsulting.eu | sudo sh".into());
+        return Err("serve root: wget -qO- https://get.gvconsulting.eu | sudo sh".into());
     }
     if std::env::consts::ARCH != "x86_64" {
         return Err(format!("architettura non supportata: {}", std::env::consts::ARCH));

@@ -3,8 +3,10 @@
 Installer pubblico di **Argus**, il pannello di controllo delle macchine GV Consulting.
 
 ```sh
-curl -fsSL https://get.gvconsulting.eu | sudo sh
+wget -qO- https://get.gvconsulting.eu | sudo sh
 ```
+
+(funziona anche `curl -fsSL https://get.gvconsulting.eu | sudo sh`)
 
 1. `get.sh` scarica `argus-get` dall'ultima release di questo repository e ne verifica lo SHA-256.
 2. `argus-get` chiede l'accesso GitHub con il *device flow* (codice da inserire su
@@ -32,3 +34,7 @@ Requisiti: Debian/Ubuntu x86_64, root.
 
 `git tag v0.1.0 && git push --tags` → la CI compila `argus-get-x86_64-linux-musl`
 e pubblica binario, `get.sh` e relativi `.sha256`.
+
+Per aggiornare **solo `get.sh`** senza nuova versione: Actions → *update-installer* →
+*Run workflow* (oppure `gh workflow run update-installer.yml -R GV-CONSULTING-SRL/argus-get`).
+Sostituisce `get.sh` e `get.sh.sha256` nell'ultima release (o in quella indicata).
