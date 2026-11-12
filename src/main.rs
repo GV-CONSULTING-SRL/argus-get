@@ -53,7 +53,7 @@ fn main() -> ExitCode {
             "--dir" => dir = args.next().unwrap_or(dir),
             "--login" => nuovo_login = true,
             "-h" | "--help" => {
-                println!("argus-get [--dir CARTELLA] [--login]\n\nInstalla Argus e avvia l'installazione nella cartella indicata (default {DEFAULT_DIR}).\n--login  ignora le credenziali salvate e rifa' l'accesso GitHub");
+                println!("argus-get [--dir CARTELLA] [--login]\n\nInstalla Argus e apre il menu principale nella cartella indicata (default {DEFAULT_DIR}).\n--login  ignora le credenziali salvate e rifa' l'accesso GitHub");
                 return ExitCode::SUCCESS;
             }
             "-V" | "--version" => {
@@ -105,8 +105,8 @@ fn run(dir: &str, nuovo_login: bool) -> Result<()> {
     let bin = install(&pacchetto)?;
     println!("✅ Argus {} installato in {}\n", release.tag_name, bin);
 
-    // da qui prosegue il pannello: stesso processo, stesso terminale
-    let e = Command::new(&bin).args(["--dir", dir, "install"]).exec();
+    // da qui prosegue il pannello dal menu principale: stesso processo, stesso terminale
+    let e = Command::new(&bin).args(["--dir", dir]).exec();
     Err(format!("avvio di {bin}: {e}"))
 }
 
